@@ -32,3 +32,5 @@ classification:
     soft_x_rays-horizontal_cam_upper:
       sxr_core: 0
       sxr_edge: 7
+    spectrometer_visible-filter_spectrometer_dalpha_voltage:  # 3-channel signal; use the final channel
+      dalpha: 2
