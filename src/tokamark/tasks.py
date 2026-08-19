@@ -19,6 +19,7 @@ GROUP_TASKS = {  # REMARK: Unused here, but imported elsewhere.
     2: ["task_2-1", "task_2-2", "task_2-3"],
     3: ["task_3-1", "task_3-2", "task_3-3"],
     4: ["task_4-1", "task_4-2", "task_4-3", "task_4-4", "task_4-5"],
+    5: ["task_5-1", "task_5-2", "task_5-3"],
 }
 
 TASKS_CONFIGS_MAP = {
@@ -36,6 +37,9 @@ TASKS_CONFIGS_MAP = {
     "task_4-3": "group_4_mhd_activity/task_4-3.yaml",
     "task_4-4": "group_4_mhd_activity/task_4-4.yaml",
     "task_4-5": "group_4_mhd_activity/task_4-5.yaml",
+    "task_5-1": "group_5_event_classification/task_5-1.yaml",
+    "task_5-2": "group_5_event_classification/task_5-2.yaml",
+    "task_5-3": "group_5_event_classification/task_5-3.yaml",
 }
 
 

@@ -1,0 +1,35 @@
+task_name: task_5-3
+task_type: markovian
+event_type: sawteeth
+
+sources_and_signals:
+  input_name: &input_keys
+    - [summary, ip]
+    - [interferometer, n_e_line]
+    - [spectrometer_visible, filter_spectrometer_dalpha_voltage]
+    - [soft_x_rays, horizontal_cam_upper]  # 18-channel signal; sxr_core/sxr_edge are channels within it
+  actuator_name: []
+  output_name: *input_keys  # dummy/unused: only present so the shared windowing engine has a non-empty output
+
+task_window_segmenter:
+  input_keys: *input_keys
+  actuator_keys: []
+  output_keys: *input_keys
+  input_length: 0.006  # 6 ms window
+  output_length: 0.006  # mirrors input_length, unused
+  delta: 0
+
+stride_window: 0.002  # 2 ms
+
+classification:
+  labels_file: classification_labels/sawteeth.json
+  label_name: Sawteeth
+  labelling_rule: center_in_interval  # a window is positive if its centre falls inside an annotated interval
+  ip_signal: summary-ip
+  ip_threshold_ka: 100
+  flattop_min_frac: 0.5
+  annotation_span_margin_s: 0.010  # windows are restricted to [min(time_min)-margin, max(time_max)+margin] per shot
+  channel_selection:
+    soft_x_rays-horizontal_cam_upper:
+      sxr_core: 0
+      sxr_edge: 7

@@ -16,9 +16,11 @@ from torch.utils.data._utils.collate import default_collate  # noqa - Ignore "ac
 
 from MAST_tools.utils.general_utils import warning_print
 from tokamark.tools.utils import get_device, get_config_from_yaml
+from tokamark.tools.path import PACKAGE_METADATA_DIR
 from tokamark.data_split import get_train_test_val_shots
 from tokamark.tasks import get_task_metadata, get_task_config
 from tokamark.data import initialize_MAST_dataset, initialize_TokaMark_dataset
+from tokamark import classification
 
 # ----------------------------------------------------------------------------------------------------------------------
 
@@ -129,6 +131,40 @@ def model_collate_fn(batch: Sequence, verbose: bool = False) -> Optional[Any]:
     return default_collate(flattened_batch) if (len(flattened_batch) > 0) else None
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+def classification_collate_fn(batch: Sequence, verbose: bool = False) -> Optional[Any]:
+    """
+    Collate function for group-5 classification tasks.
+
+    Parameters
+    ----------
+    batch : Sequence
+        Input batch, where each item is a window dict produced by
+        `tokamark.classification.make_classification_transform` (keys "shot_id", "window_index", "input", "label").
+    verbose : bool
+        If True, activate verbose mode.
+        Optional. Default: False.
+
+    Returns
+    -------
+    Optional[Any]
+        Default collate function evaluated on flattened batch if feasible, None otherwise.
+
+    """
+
+    flattened_batch = [
+        (item["shot_id"], item["window_index"], [data["values"] for data in item["input"].values()], item["label"])
+        for item in batch
+    ]
+
+    if verbose:
+        print(f"\nNumber of shots in a batch = {len(batch)}; number of samples (segments) = {len(flattened_batch)}")
+        if len(flattened_batch) == 0:
+            print("batch is None")
+
+    return default_collate(flattened_batch) if (len(flattened_batch) > 0) else None
+
+
 # ======================================================================================================================
 if __name__ == "__main__":
     print(f"Number of available CPU cores: {cpu_count()}\n")
@@ -158,6 +194,9 @@ if __name__ == "__main__":
             "task_4-3",
             "task_4-4",
             "task_4-5",
+            "task_5-1",
+            "task_5-2",
+            "task_5-3",
         ],
         default="test_task",
         help="The name of the task available in the benchmark.",
@@ -203,6 +242,8 @@ if __name__ == "__main__":
         # Otherwise, use the provided benchmark task
         config_task = get_task_config(task_name=args.task)
 
+    is_classification_task = "classification" in config_task
+
     # ------------------------------------------------------------------------------------------------------------------
     # Initialize datasets and metadata
     # ------------------------------------------------------------------------------------------------------------------
@@ -210,6 +251,47 @@ if __name__ == "__main__":
     train_shots_, test_shots_, val_shots_ = get_train_test_val_shots(**pipeline_config["get_shots_settings"])
 
     local_flag = pipeline_config["local"]
+
+    if is_classification_task:
+        # For group-5 event-classification tasks, restrict every split to shots that actually carry annotations
+        # for this task, and precompute the per-shot flat-top/disruption/annotation-span bounds the classification
+        # transform needs (see `tokamark.classification`).
+
+        cls_config = config_task["classification"]
+
+        annotations = classification.load_event_annotations(
+            labels_file=str(Path(PACKAGE_METADATA_DIR) / cls_config["labels_file"])
+        )
+
+        train_shots_ = classification.get_annotated_shots(annotations=annotations, shots_list=train_shots_)
+        val_shots_ = classification.get_annotated_shots(annotations=annotations, shots_list=val_shots_)
+        test_shots_ = classification.get_annotated_shots(annotations=annotations, shots_list=test_shots_)
+
+        ip_source, ip_signal_name = cls_config["ip_signal"].split("-", 1)
+        ip_only_config_task = {
+            "sources_and_signals": {
+                "input_name": [[ip_source, ip_signal_name]],
+                "actuator_name": [],
+                "output_name": [[ip_source, ip_signal_name]],
+            }
+        }
+        classification_shots = sorted(set(train_shots_) | set(val_shots_) | set(test_shots_))
+
+        raw_ip_dataset = initialize_MAST_dataset(
+            config_task=ip_only_config_task,
+            shots_list=classification_shots,
+            local_flag=local_flag,
+            **{**pipeline_config["mast_dataset_init_settings"], "use_std_scaling": False},
+            store_manager_settings=pipeline_config["store_manager_settings"],
+            verbose=True,
+        )
+
+        bounds_by_shot = classification.precompute_shot_windowing_bounds(
+            raw_ip_dataset=raw_ip_dataset, config_task=config_task, annotations=annotations
+        )
+        classification_transform = classification.make_classification_transform(
+            config_task=config_task, annotations=annotations, bounds_by_shot=bounds_by_shot
+        )
 
     train_MAST_dataset = initialize_MAST_dataset(
         config_task=config_task,
@@ -248,20 +330,25 @@ if __name__ == "__main__":
     # EXAMPLE WITH MODEL SPECIFIC PIPELINE
     # ------------------------------------------------------------------------------------------------------------------
 
-    model_specific_transform = ModelSpecificTransform()  # <- Likely depends on dict_task_metadata
+    if is_classification_task:
+        custom_transform = classification_transform
+        train_collate_fn = classification_collate_fn
+    else:
+        custom_transform = ModelSpecificTransform()  # <- Likely depends on dict_task_metadata
+        train_collate_fn = model_collate_fn
 
     train_model_dataset = initialize_TokaMark_dataset(
         dataset=train_MAST_dataset,
         task_metadata=dict_task_metadata,
         config_metadata=config_task,
-        custom_transform=model_specific_transform,
+        custom_transform=custom_transform,
         **pipeline_config["tokamark_dataset_init_settings"],
         verbose=False,
     )
 
     train_dataloader = DataLoader(
         dataset=train_model_dataset,  # noqa - Ignore expected type warning
-        collate_fn=model_collate_fn,
+        collate_fn=train_collate_fn,
         # drop_last=True,
         **pipeline_config["dataloader_settings"],
         pin_memory=True,
@@ -272,6 +359,9 @@ if __name__ == "__main__":
     # ..................................................................................................................
     # Evaluation loop for train_dataloader
     # ..................................................................................................................
+
+    n_positive_windows = 0
+    n_total_windows = 0
 
     for batch_idx, batch_ in enumerate(train_dataloader):
         print(f"\nBatch {batch_idx}")
@@ -284,11 +374,19 @@ if __name__ == "__main__":
         # print("Mean x_train", [torch.nanmean(arr) for arr in x_train])
         # print("Std x_train", [np.nanstd(arr) for arr in x_train])
 
-        print("The y_train has been collated to shape (B, ..., T), ", [arr.shape for arr in y_train])
-        # print("Mean y_train", [torch.nanmean(arr) for arr in y_train])
-        # print("Std y_train", [np.nanstd(arr) for arr in y_train])
+        if is_classification_task:
+            n_positive_windows += int(y_train.sum())
+            n_total_windows += int(y_train.numel())
+            print(f"The label balance for this batch is {int(y_train.sum())} / {int(y_train.numel())} positive")
+        else:
+            print("The y_train has been collated to shape (B, ..., T), ", [arr.shape for arr in y_train])
+            # print("Mean y_train", [torch.nanmean(arr) for arr in y_train])
+            # print("Std y_train", [np.nanstd(arr) for arr in y_train])
 
         print("____________________________________________________\n")
+
+    if is_classification_task and (n_total_windows > 0):
+        print(f"\nOverall label balance: {n_positive_windows} / {n_total_windows} positive windows")
 
     # print(x_train[0][0:10])
     # print("\n\n\n")
