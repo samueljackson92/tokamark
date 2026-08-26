@@ -15,11 +15,11 @@ task_window_segmenter:
   input_keys: *input_keys
   actuator_keys: []
   output_keys: *input_keys
-  input_length: 0.006  # 6 ms window
-  output_length: 0.006  # mirrors input_length, unused
+  input_length: 0.003  # 3 ms window -- EXPERIMENT: was 0.006 (6 ms)
+  output_length: 0.003  # mirrors input_length, unused
   delta: 0
 
-stride_window: 0.002  # 2 ms
+stride_window: 0.001  # 1 ms -- EXPERIMENT: was 0.002 (2 ms)
 
 classification:
   labels_file: classification_labels/sawteeth.json
@@ -31,6 +31,8 @@ classification:
   annotation_span_margin_s: 0.010  # windows are restricted to [min(time_min)-margin, max(time_max)+margin] per shot
   channel_selection:
     soft_x_rays-horizontal_cam_upper:
-      sxr_core: 0
+      sxr_core: 2  # EXPERIMENT: was 0. Chord 0 is an end chord of the 18-chord array and carries
+                   # almost no plasma signal (per-shot std ~0.009 against ~0.13 for chords 1-6, on
+                   # every one of the 39 annotated shots), so it was feeding the model noise.
     spectrometer_visible-filter_spectrometer_dalpha_voltage:  # 3-channel signal; use the final channel
       dalpha: 2

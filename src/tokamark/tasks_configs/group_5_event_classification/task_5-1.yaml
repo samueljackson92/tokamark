@@ -15,11 +15,11 @@ task_window_segmenter:
   input_keys: *input_keys
   actuator_keys: []
   output_keys: *input_keys
-  input_length: 0.020  # 20 ms window
-  output_length: 0.020  # mirrors input_length, unused
+  input_length: 0.004  # 4 ms window -- EXPERIMENT: was 0.020 (20 ms)
+  output_length: 0.004  # mirrors input_length, unused
   delta: 0
 
-stride_window: 0.005  # 5 ms
+stride_window: 0.001  # 1 ms -- EXPERIMENT: was 0.005 (5 ms)
 
 classification:
   labels_file: classification_labels/elms.json
