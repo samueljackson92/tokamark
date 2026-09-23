@@ -28,6 +28,7 @@ classification:
   ip_signal: summary-ip
   ip_threshold_ka: 100
   flattop_min_frac: 0.5
+  disruption_clip_s: 0.05  # windows within 50 ms before the shot's disruption time are excluded
   channel_selection:
     soft_x_rays-horizontal_cam_upper:
       sxr_core: 0
